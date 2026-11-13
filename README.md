@@ -9,8 +9,8 @@ Windows-Fassung von [Hikidashi für den Mac](https://github.com/Kenvoice/hikidas
 von Kenzo Weiss. Neu geschrieben in Rust; Bedienung, Grenzen und Datenformat folgen
 dem Original.
 
-> **Stand 0.1:** erste Version, unter Windows noch nicht von Hand getestet. Die CI
-> prüft Zwischenablage, Einfügen und Autostart auf einem Windows-Runner.
+> **Stand 0.1.0:** erste freigegebene Version, unter Windows von Hand getestet. Die CI
+> prüft zusätzlich Zwischenablage, Einfügen und Autostart auf einem Windows-Runner.
 > Texterkennung auf Bildern und der Inbox-Ordner kommen in Schritt 2.
 
 ## Was die App kann
@@ -58,6 +58,13 @@ Nicht aufgenommen wird:
   (`ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory = 0`),
   und alles aus 1Password, Bitwarden, KeePass, KeePassXC, Dashlane, LastPass, Enpass,
   Proton Pass, NordPass, RoboForm und Keeper
+- Text, der wie ein Passwort aussieht – egal aus welchem Programm. Das ist nötig, weil
+  Browser-Erweiterungen von Passwort-Managern (NordPass, Bitwarden & Co. in Chrome
+  oder Edge) beim Kopieren keine Markierung setzen. Als passwortähnlich gilt ein
+  einzelnes Wort mit 8 bis 64 Zeichen aus mindestens drei Zeichenarten (Klein-,
+  Großbuchstaben, Ziffern, Sonderzeichen). Webadressen, E-Mail-Adressen, Pfade, UUIDs
+  und Datumsangaben zählen nicht dazu. Nebenwirkung: Auch API-Schlüssel und ähnliche
+  Codes landen nicht im Verlauf.
 - Text über 2 MB und Bilder über 40 MB
 
 Der Verlauf hält 300 Einträge, davon höchstens 60 Bilder. Das Älteste fällt raus,
@@ -65,8 +72,9 @@ Angeheftetes zählt nicht mit.
 
 ## Installieren
 
-Die fertige `hikidashi.exe` liegt nach jedem Lauf der CI als Artefakt
-`hikidashi-windows-x64` unter *Actions* (mit SHA256-Prüfsumme). Die Datei irgendwo
+Die fertige `hikidashi.exe` liegt unter *Releases* (mit SHA256-Prüfsumme);
+Zwischenstände nach jedem CI-Lauf als Artefakt `hikidashi-windows-x64` unter
+*Actions*. Die Datei irgendwo
 ablegen, z. B. unter `%LOCALAPPDATA%\Programs\Hikidashi\`, und starten. Es gibt
 keinen Installer. Die EXE ist nicht signiert, deshalb warnt SmartScreen beim ersten
 Start („Weitere Informationen“ → „Trotzdem ausführen“).

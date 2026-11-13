@@ -341,6 +341,16 @@ impl Verlauf {
         }
     }
 
+    /// Entfernt nicht angeheftete Texteinträge, auf die `ist_geheim` zutrifft.
+    /// Gibt die Anzahl zurück.
+    pub fn texte_entfernen(&mut self, ist_geheim: impl Fn(&str) -> bool) -> usize {
+        let vorher = self.eintraege.len();
+        self.eintraege.retain(|e| {
+            e.angeheftet || e.art != Art::Text || !e.text.as_deref().is_some_and(&ist_geheim)
+        });
+        vorher - self.eintraege.len()
+    }
+
     /// Leert den Verlauf. Angeheftetes bleibt.
     pub fn leeren(&mut self) {
         let mut i = 0;
@@ -559,6 +569,18 @@ mod tests {
         let v = Verlauf::laden(&o);
         assert!(v.eintraege.is_empty());
         assert!(o.join("verlauf.defekt.json").exists());
+    }
+
+    #[test]
+    fn geheime_texte_entfernen_laesst_angeheftetes_stehen() {
+        let mut v = Verlauf::laden(&ordner("geheim"));
+        let normal = v.text_aufnehmen("normal".into(), None, 1).unwrap();
+        v.text_aufnehmen("GEHEIM-1".into(), None, 2).unwrap();
+        let fest = v.text_aufnehmen("GEHEIM-2".into(), None, 3).unwrap();
+        v.anheften_umschalten(fest);
+        assert_eq!(v.texte_entfernen(|t| t.starts_with("GEHEIM")), 1);
+        let ids: Vec<u64> = v.eintraege.iter().map(|e| e.id).collect();
+        assert_eq!(ids, vec![fest, normal]);
     }
 
     #[test]

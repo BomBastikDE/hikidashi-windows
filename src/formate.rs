@@ -249,6 +249,85 @@ pub fn ist_passwortmanager(exe: &str) -> bool {
     PASSWORT_MANAGER.contains(&name.as_str())
 }
 
+/// Erkennt Text, der wie ein Passwort aussieht: ein einzelnes Wort mit 8 bis 64 Zeichen
+/// aus mindestens drei Zeichenarten (Klein, Groß, Ziffer, Sonderzeichen). Adressen,
+/// E-Mail, Pfade, UUIDs und ISO-Daten zählen nicht. Gedacht für Passwörter aus
+/// Browser-Erweiterungen, die keine Geheim-Markierung setzen (Issue #3).
+pub fn sieht_aus_wie_passwort(t: &str) -> bool {
+    let n = t.chars().count();
+    if !(8..=64).contains(&n) || t.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return false;
+    }
+    let klein = t.chars().any(|c| c.is_lowercase());
+    let gross = t.chars().any(|c| c.is_uppercase());
+    let ziffer = t.chars().any(|c| c.is_ascii_digit());
+    let sonder = t.chars().any(|c| !c.is_alphanumeric());
+    if [klein, gross, ziffer, sonder]
+        .iter()
+        .filter(|&&b| b)
+        .count()
+        < 3
+    {
+        return false;
+    }
+    !(ist_adresse(t) || ist_email(t) || ist_pfad(t) || ist_uuid(t) || ist_iso_datum(t))
+}
+
+fn ist_adresse(t: &str) -> bool {
+    let l = t.to_lowercase();
+    l.contains("://") || l.starts_with("www.") || l.starts_with("mailto:")
+}
+
+fn ist_email(t: &str) -> bool {
+    let Some((lokal, domain)) = t.split_once('@') else {
+        return false;
+    };
+    let Some((name, tld)) = domain.rsplit_once('.') else {
+        return false;
+    };
+    !lokal.is_empty()
+        && !name.is_empty()
+        && lokal
+            .chars()
+            .all(|c| c.is_alphanumeric() || "._%+-".contains(c))
+        && domain
+            .chars()
+            .all(|c| c.is_alphanumeric() || ".-".contains(c))
+        && tld.chars().count() >= 2
+        && tld.chars().all(|c| c.is_alphabetic())
+}
+
+fn ist_pfad(t: &str) -> bool {
+    let b = t.as_bytes();
+    t.starts_with("\\\\")
+        || t.starts_with('/')
+        || t.starts_with("~/")
+        || t.starts_with(".\\")
+        || t.starts_with("./")
+        || (b.len() > 2
+            && b[0].is_ascii_alphabetic()
+            && b[1] == b':'
+            && (b[2] == b'\\' || b[2] == b'/'))
+}
+
+fn ist_uuid(t: &str) -> bool {
+    let teile: Vec<&str> = t.trim_matches(['{', '}']).split('-').collect();
+    teile.iter().map(|s| s.len()).eq([8, 4, 4, 4, 12])
+        && teile
+            .iter()
+            .all(|s| s.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+fn ist_iso_datum(t: &str) -> bool {
+    let b = t.as_bytes();
+    b.len() >= 10
+        && b[..4].iter().all(u8::is_ascii_digit)
+        && b[4] == b'-'
+        && b[5..7].iter().all(u8::is_ascii_digit)
+        && b[7] == b'-'
+        && b[8..10].iter().all(u8::is_ascii_digit)
+}
+
 /// Symbol einer Schublade, BGRA von oben nach unten, für CreateIcon.
 pub fn symbol_bgra(g: u32) -> Vec<u8> {
     let s = g as f32 / 32.0;
@@ -370,6 +449,37 @@ mod tests {
         ];
         assert_eq!(dropfiles_lesen(&dropfiles_bauen(&pfade)), pfade);
         assert!(dropfiles_lesen(&[1, 2]).is_empty());
+    }
+
+    #[test]
+    fn passwortaehnliches_wird_erkannt() {
+        for pw in [
+            "Xk9#mP2$vL",                 // generiert, vier Zeichenarten
+            "Sommer2024!",                // menschlich
+            "correct-Horse-battery",      // klein, groß, Sonderzeichen
+            "aB3dE6gH9jK2mN5pQ8sT1vW4yZ", // ohne Sonderzeichen, drei Arten
+            "p@ssW0rd",                   // @ im Passwort, keine E-Mail
+            "Ünïcode-Pässwört1",
+        ] {
+            assert!(sieht_aus_wie_passwort(pw), "{pw}");
+        }
+        for kein in [
+            "kurz1A!",                              // 7 Zeichen
+            "nurkleinbuchstaben",                   // eine Zeichenart
+            "abc123def456",                         // zwei Zeichenarten
+            "Hallo Welt 2024!",                     // Leerzeichen
+            "https://Beispiel.de/A1",               // Adresse
+            "www.Beispiel-1.de",                    // Adresse
+            "Max.Mustermann@Beispiel.de",           // E-Mail
+            r"C:\Users\Max\Bericht_2026.pdf",       // Pfad
+            r"\\server\Freigabe\Datei1",            // UNC-Pfad
+            "/home/Max/Datei_1",                    // Unix-Pfad
+            "550e8400-e29b-41d4-A716-446655440000", // UUID
+            "2026-11-13T18:46:00Z",                 // ISO-Datum
+            "Ab1!".repeat(17).as_str(),             // 68 Zeichen
+        ] {
+            assert!(!sieht_aus_wie_passwort(kein), "{kein}");
+        }
     }
 
     #[test]
