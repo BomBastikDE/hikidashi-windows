@@ -27,7 +27,7 @@ use windows::Win32::UI::HiDpi::{
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, RegisterHotKey, SetFocus, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, VIRTUAL_KEY, VK_1,
-    VK_9, VK_A, VK_C, VK_CONTROL, VK_DELETE, VK_DOWN, VK_ESCAPE, VK_NEXT, VK_P, VK_PRIOR,
+    VK_9, VK_A, VK_C, VK_CONTROL, VK_DELETE, VK_DOWN, VK_ESCAPE, VK_F2, VK_NEXT, VK_P, VK_PRIOR,
     VK_RETURN, VK_SHIFT, VK_TAB, VK_UP, VK_V,
 };
 use windows::Win32::UI::Shell::{
@@ -51,8 +51,9 @@ const M_LEEREN: usize = 1004;
 const M_ORDNER: usize = 1005;
 const M_BEENDEN: usize = 1006;
 
-const HILFE: &str =
-    "Enter einfügen · Strg+Enter kopieren · Strg+P anheften · Entf löschen · Tab Reiter";
+const HILFE: &str = "Enter einfügen · Strg+P anheften · F2 Name · Entf löschen · Tab Reiter";
+const HINWEIS_NAME: &str = "Name eingeben · Enter speichert · Esc bricht ab · leer = Inhalt zeigen";
+const HINWEIS_NUR_ANGEHEFTET: &str = "Nur angeheftete Einträge bekommen einen Namen (erst Strg+P)";
 
 struct Zustand {
     verlauf: Verlauf,
@@ -71,6 +72,8 @@ struct Zustand {
     fuss: HWND,
     symbol: HICON,
     taskbar_neu: u32,
+    /// Eintrag, dessen Name gerade im Suchfeld bearbeitet wird (F2).
+    umbenennen: Option<u64>,
 }
 
 thread_local! {
@@ -351,6 +354,7 @@ pub fn starten() {
                 fuss,
                 symbol,
                 taskbar_neu: RegisterWindowMessageW(w!("TaskbarCreated")),
+                umbenennen: None,
             })
         });
 
@@ -407,6 +411,7 @@ fn zeigen() {
             z.vorher = vorne;
         }
         z.reiter = Reiter::Verlauf;
+        z.umbenennen = None;
         (z.fenster, z.suche)
     }) else {
         return;
@@ -446,9 +451,15 @@ fn aktualisieren(nach_oben: bool) {
     let Some((suche, liste, kopf)) = mit(|z| (z.suche, z.liste, z.kopf)) else {
         return;
     };
-    let suchtext = fenstertext(suche);
+    let eingabe = fenstertext(suche);
     let Some((zeilen, kopftext)) = mit(|z| {
-        z.ids = z.verlauf.auswahl(z.reiter, &suchtext);
+        // Beim Benennen steht der neue Name im Suchfeld: dann nicht filtern.
+        let suchtext = if z.umbenennen.is_some() {
+            ""
+        } else {
+            eingabe.as_str()
+        };
+        z.ids = z.verlauf.auswahl(z.reiter, suchtext);
         let t = jetzt();
         let zeilen: Vec<String> = z
             .ids
@@ -471,7 +482,9 @@ fn aktualisieren(nach_oben: bool) {
             })
             .collect::<Vec<_>>()
             .join("    ");
-        if z.pausiert {
+        if z.umbenennen.is_some() {
+            kopf = HINWEIS_NAME.to_string();
+        } else if z.pausiert {
             kopf.push_str("     ⏸ pausiert");
         } else if zeilen.is_empty() {
             kopf.push_str(if suchtext.trim().is_empty() {
@@ -505,6 +518,70 @@ fn aktualisieren(nach_oben: bool) {
         let _ = InvalidateRect(Some(liste), None, true);
     }
     text_setzen(kopf, &kopftext);
+}
+
+/// Wählt die Zeile mit diesem Eintrag aus, falls sie sichtbar ist.
+fn auswaehlen(id: u64) {
+    let Some((liste, Some(i))) = mit(|z| (z.liste, z.ids.iter().position(|x| *x == id))) else {
+        return;
+    };
+    unsafe {
+        SendMessageW(liste, LB_SETCURSEL, Some(WPARAM(i)), None);
+    }
+}
+
+/// F2: Namen des ausgewählten angehefteten Eintrags im Suchfeld bearbeiten.
+fn benennen_starten() {
+    let Some(id) = ausgewaehlt() else { return };
+    let Some((suche, kopf, start)) = mit(|z| {
+        let e = z.verlauf.finden(id)?;
+        if !e.angeheftet {
+            return Some((z.suche, z.kopf, None));
+        }
+        let vorschlag = e.titel.clone().unwrap_or_else(|| {
+            e.text
+                .as_deref()
+                .map(verlauf::erste_zeile)
+                .unwrap_or_default()
+        });
+        z.umbenennen = Some(id);
+        Some((z.suche, z.kopf, Some(vorschlag)))
+    })
+    .flatten() else {
+        return;
+    };
+    let Some(vorschlag) = start else {
+        text_setzen(kopf, HINWEIS_NUR_ANGEHEFTET);
+        return;
+    };
+    // Erst den Modus setzen (oben), dann das Feld füllen: EN_CHANGE filtert dann nicht.
+    text_setzen(suche, &vorschlag);
+    aktualisieren(false);
+    auswaehlen(id);
+    unsafe {
+        let _ = SetFocus(Some(suche));
+        SendMessageW(suche, EM_SETSEL, Some(WPARAM(0)), Some(LPARAM(-1)));
+    }
+}
+
+/// Enter (speichern) oder Esc (abbrechen) beim Benennen.
+fn benennen_beenden(speichern: bool) {
+    let Some((suche, id)) = mit(|z| (z.suche, z.umbenennen.take())) else {
+        return;
+    };
+    let Some(id) = id else { return };
+    if speichern {
+        let name = fenstertext(suche);
+        mit(|z| {
+            if z.verlauf.umbenennen(id, &name) {
+                let _ = z.verlauf.speichern();
+            }
+        });
+    }
+    // Modus ist aus: Leeren des Feldes baut die Liste ungefiltert neu auf.
+    text_setzen(suche, "");
+    aktualisieren(false);
+    auswaehlen(id);
 }
 
 fn ausgewaehlt() -> Option<u64> {
@@ -737,7 +814,9 @@ unsafe extern "system" fn fensterproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
         WM_COMMAND => {
             let (id, code) = (niedrig(wp.0), (wp.0 >> 16) & 0xffff);
             if id == ID_SUCHE && code == EN_CHANGE as usize {
-                aktualisieren(true);
+                if mit(|z| z.umbenennen.is_none()) == Some(true) {
+                    aktualisieren(true);
+                }
             } else if id == ID_LISTE && code == LBN_DBLCLK as usize {
                 einfuegen(ausgewaehlt(), false);
             }
@@ -803,6 +882,29 @@ unsafe extern "system" fn tastenproc(
     match msg {
         WM_KEYDOWN => {
             let vk = VIRTUAL_KEY(wp.0 as u16);
+            if mit(|z| z.umbenennen.is_some()) == Some(true) {
+                // Beim Benennen: nur Enter/Esc; Navigation und Kürzel ruhen,
+                // normale Bearbeitung (Entf, Pfeile links/rechts, Strg+C/V) bleibt im Feld.
+                if vk == VK_RETURN || vk == VK_ESCAPE {
+                    benennen_beenden(vk == VK_RETURN);
+                    return LRESULT(0);
+                }
+                let gesperrt = [VK_DOWN, VK_UP, VK_PRIOR, VK_NEXT, VK_TAB, VK_F2].contains(&vk)
+                    || (h == liste && vk == VK_DELETE)
+                    || (strg && (vk == VK_P || (VK_1.0..=VK_9.0).contains(&vk.0)));
+                if gesperrt {
+                    return LRESULT(0);
+                }
+                if strg && vk == VK_A && h == suche {
+                    SendMessageW(h, EM_SETSEL, Some(WPARAM(0)), Some(LPARAM(-1)));
+                    return LRESULT(0);
+                }
+                return DefSubclassProc(h, msg, wp, lp);
+            }
+            if vk == VK_F2 {
+                benennen_starten();
+                return LRESULT(0);
+            }
             if h == suche && (vk == VK_DOWN || vk == VK_UP || vk == VK_PRIOR || vk == VK_NEXT) {
                 let schritt = match vk {
                     VK_DOWN => 1,
