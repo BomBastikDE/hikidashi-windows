@@ -9,8 +9,8 @@ Windows-Fassung von [Hikidashi für den Mac](https://github.com/Kenvoice/hikidas
 von Kenzo Weiss. Neu geschrieben in Rust; Bedienung, Grenzen und Datenformat folgen
 dem Original.
 
-> **Stand 0.1:** erste Version, unter Windows noch nicht von Hand getestet. Die CI
-> prüft Zwischenablage, Einfügen und Autostart auf einem Windows-Runner.
+> **Stand 0.1.0:** erste freigegebene Version, unter Windows von Hand getestet. Die CI
+> prüft zusätzlich Zwischenablage, Einfügen und Autostart auf einem Windows-Runner.
 > Texterkennung auf Bildern und der Inbox-Ordner kommen in Schritt 2.
 
 ## Was die App kann
@@ -72,8 +72,9 @@ Angeheftetes zählt nicht mit.
 
 ## Installieren
 
-Die fertige `hikidashi.exe` liegt nach jedem Lauf der CI als Artefakt
-`hikidashi-windows-x64` unter *Actions* (mit SHA256-Prüfsumme). Die Datei irgendwo
+Die fertige `hikidashi.exe` liegt unter *Releases* (mit SHA256-Prüfsumme);
+Zwischenstände nach jedem CI-Lauf als Artefakt `hikidashi-windows-x64` unter
+*Actions*. Die Datei irgendwo
 ablegen, z. B. unter `%LOCALAPPDATA%\Programs\Hikidashi\`, und starten. Es gibt
 keinen Installer. Die EXE ist nicht signiert, deshalb warnt SmartScreen beim ersten
 Start („Weitere Informationen“ → „Trotzdem ausführen“).
