@@ -1,6 +1,6 @@
 # Änderungen
 
-## 0.2.0 — unveröffentlicht
+## 0.2.0 — 2026-11-13
 
 - **Angeheftetes benennen:** F2 gibt einem angehefteten Eintrag einen eigenen Namen,
   der in der Liste statt des Inhalts steht. Eingefügt wird weiter der Inhalt; die
