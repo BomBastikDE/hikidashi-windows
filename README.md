@@ -102,7 +102,7 @@ sich auch unter Linux testen: `cargo test`.
 ## Lizenz
 
 MIT, siehe [LICENSE](LICENSE). Idee, Bedienkonzept und Name stammen aus dem
-Mac-Original von Kenzo Weiss.
+Mac-Original von [Kenzo Weiss](https://github.com/Kenvoice/hikidashi).
 
 ---
 
