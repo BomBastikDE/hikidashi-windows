@@ -331,9 +331,14 @@ pub fn starten() {
         let ordner = datenordner();
         let erster_start = !ordner.join("verlauf.json").exists();
         let symbol = symbol_erzeugen();
+        let mut verlauf = Verlauf::laden(&ordner);
+        // Was eine ältere Version schon aufgenommen hat, nachträglich entfernen (Issue #3).
+        if verlauf.texte_entfernen(formate::sieht_aus_wie_passwort) > 0 {
+            let _ = verlauf.speichern();
+        }
         Z.with(|z| {
             *z.borrow_mut() = Some(Zustand {
-                verlauf: Verlauf::laden(&ordner),
+                verlauf,
                 reiter: Reiter::Verlauf,
                 ids: Vec::new(),
                 pausiert: false,
@@ -573,6 +578,10 @@ fn aufnehmen(h: HWND) {
     let Some(inhalt) = ablage::lesen(h) else {
         return;
     };
+    // Passwörter aus Browser-Erweiterungen tragen keine Markierung: am Inhalt erkennen.
+    if matches!(&inhalt, Inhalt::Text(t) if formate::sieht_aus_wie_passwort(t)) {
+        return;
+    }
     // Kodieren außerhalb des Zustands; bei großen Bildern dauert das einen Moment.
     let bild = match &inhalt {
         Inhalt::Bild(b) => match formate::png_kodieren(b) {

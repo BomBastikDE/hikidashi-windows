@@ -58,6 +58,13 @@ Nicht aufgenommen wird:
   (`ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory = 0`),
   und alles aus 1Password, Bitwarden, KeePass, KeePassXC, Dashlane, LastPass, Enpass,
   Proton Pass, NordPass, RoboForm und Keeper
+- Text, der wie ein Passwort aussieht – egal aus welchem Programm. Das ist nötig, weil
+  Browser-Erweiterungen von Passwort-Managern (NordPass, Bitwarden & Co. in Chrome
+  oder Edge) beim Kopieren keine Markierung setzen. Als passwortähnlich gilt ein
+  einzelnes Wort mit 8 bis 64 Zeichen aus mindestens drei Zeichenarten (Klein-,
+  Großbuchstaben, Ziffern, Sonderzeichen). Webadressen, E-Mail-Adressen, Pfade, UUIDs
+  und Datumsangaben zählen nicht dazu. Nebenwirkung: Auch API-Schlüssel und ähnliche
+  Codes landen nicht im Verlauf.
 - Text über 2 MB und Bilder über 40 MB
 
 Der Verlauf hält 300 Einträge, davon höchstens 60 Bilder. Das Älteste fällt raus,
