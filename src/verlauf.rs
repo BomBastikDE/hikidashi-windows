@@ -50,7 +50,13 @@ pub struct Eintrag {
     pub zeit: i64,
     #[serde(default)]
     pub angeheftet: bool,
+    /// Eigener Name eines angehefteten Eintrags; ersetzt in der Liste den Inhalt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub titel: Option<String>,
 }
+
+/// Längster eigener Name in Zeichen.
+pub const MAX_TITEL: usize = 100;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reiter {
@@ -196,6 +202,7 @@ impl Verlauf {
                 quelle,
                 zeit: jetzt,
                 angeheftet: false,
+                titel: None,
             },
         );
         self.kuerzen();
@@ -233,6 +240,7 @@ impl Verlauf {
                 quelle,
                 zeit: jetzt,
                 angeheftet: false,
+                titel: None,
             },
         );
         self.kuerzen();
@@ -275,6 +283,7 @@ impl Verlauf {
                 quelle,
                 zeit: jetzt,
                 angeheftet: false,
+                titel: None,
             },
         );
         self.kuerzen();
@@ -341,6 +350,25 @@ impl Verlauf {
         }
     }
 
+    /// Gibt einem angehefteten Eintrag einen eigenen Namen. Leerer Name setzt ihn zurück.
+    /// Nicht angeheftete Einträge lassen sich nicht benennen (Rückgabe `false`).
+    pub fn umbenennen(&mut self, id: u64, name: &str) -> bool {
+        match self.eintraege.iter_mut().find(|e| e.id == id) {
+            Some(e) if e.angeheftet => {
+                let name: String = name
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .chars()
+                    .take(MAX_TITEL)
+                    .collect();
+                e.titel = (!name.is_empty()).then_some(name);
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Entfernt nicht angeheftete Texteinträge, auf die `ist_geheim` zutrifft.
     /// Gibt die Anzahl zurück.
     pub fn texte_entfernen(&mut self, ist_geheim: impl Fn(&str) -> bool) -> usize {
@@ -392,6 +420,10 @@ pub fn passt(e: &Eintrag, woerter: &[String]) -> bool {
         return true;
     }
     let mut heuhaufen = String::new();
+    if let Some(t) = &e.titel {
+        heuhaufen.push_str(&t.to_lowercase());
+        heuhaufen.push('\n');
+    }
     if let Some(t) = &e.text {
         heuhaufen.push_str(&t.to_lowercase());
         heuhaufen.push('\n');
@@ -420,10 +452,13 @@ pub fn anzeige(e: &Eintrag, nummer: Option<usize>, jetzt: i64) -> String {
     if e.angeheftet {
         s.push_str("📌 ");
     }
-    let inhalt = match e.art {
-        Art::Text => e.text.as_deref().map(erste_zeile).unwrap_or_default(),
-        Art::Bild => format!("🖼 Bild {} × {}", e.breite, e.hoehe),
-        Art::Datei => {
+    let inhalt = match (e.art, &e.titel) {
+        (Art::Text, Some(t)) => t.clone(),
+        (Art::Bild, Some(t)) => format!("🖼 {t}"),
+        (Art::Datei, Some(t)) => format!("📄 {t}"),
+        (Art::Text, None) => e.text.as_deref().map(erste_zeile).unwrap_or_default(),
+        (Art::Bild, None) => format!("🖼 Bild {} × {}", e.breite, e.hoehe),
+        (Art::Datei, None) => {
             let erste = e
                 .dateien
                 .first()
@@ -603,6 +638,65 @@ mod tests {
     }
 
     #[test]
+    fn angeheftetes_benennen() {
+        let o = ordner("benennen");
+        let mut v = Verlauf::laden(&o);
+        let a = v
+            .text_aufnehmen("Musterstraße 1\n12345 Musterstadt".into(), None, 1)
+            .unwrap();
+        let b = v.bild_aufnehmen(b"png", 4, 3, 1, None, 2).unwrap().unwrap();
+        // Nicht angeheftet: kein Name.
+        assert!(!v.umbenennen(a, "Adresse"));
+        assert_eq!(v.finden(a).unwrap().titel, None);
+        v.anheften_umschalten(a);
+        v.anheften_umschalten(b);
+        // Leerraum wird zusammengefasst, Länge begrenzt.
+        assert!(v.umbenennen(a, "  Meine \t Adresse  "));
+        assert_eq!(v.finden(a).unwrap().titel.as_deref(), Some("Meine Adresse"));
+        assert!(v.umbenennen(b, &"x".repeat(150)));
+        assert_eq!(
+            v.finden(b).unwrap().titel.as_ref().unwrap().chars().count(),
+            MAX_TITEL
+        );
+        assert!(v.umbenennen(b, "Logo"));
+        // Anzeige zeigt den Namen, Suche findet Name und Inhalt.
+        assert_eq!(
+            anzeige(v.finden(a).unwrap(), None, 61),
+            "    📌 Meine Adresse   · vor 1 Min."
+        );
+        assert_eq!(
+            anzeige(v.finden(b).unwrap(), None, 61),
+            "    📌 🖼 Logo   · gerade eben"
+        );
+        assert_eq!(v.auswahl(Reiter::Verlauf, "adresse"), vec![a]);
+        assert_eq!(v.auswahl(Reiter::Verlauf, "musterstadt"), vec![a]);
+        assert_eq!(v.auswahl(Reiter::Verlauf, "logo"), vec![b]);
+        // Name bleibt beim erneuten Kopieren, Speichern und Leeren erhalten.
+        v.text_aufnehmen("Musterstraße 1\n12345 Musterstadt".into(), None, 70);
+        v.speichern().unwrap();
+        let mut w = Verlauf::laden(&o);
+        w.leeren();
+        assert_eq!(w.finden(a).unwrap().titel.as_deref(), Some("Meine Adresse"));
+        // Leerer Name setzt zurück.
+        assert!(w.umbenennen(a, "   "));
+        assert_eq!(w.finden(a).unwrap().titel, None);
+    }
+
+    #[test]
+    fn alte_verlaufsdatei_ohne_titel_bleibt_lesbar() {
+        let o = ordner("alt");
+        fs::create_dir_all(&o).unwrap();
+        fs::write(
+            o.join(DATEI),
+            r#"{"version":1,"naechste_id":2,"eintraege":[{"id":1,"art":"text","text":"alt","zeit":5,"angeheftet":true}]}"#,
+        )
+        .unwrap();
+        let v = Verlauf::laden(&o);
+        assert_eq!(v.eintraege.len(), 1);
+        assert_eq!(v.eintraege[0].titel, None);
+    }
+
+    #[test]
     fn anzeige_und_zeit() {
         let e = Eintrag {
             id: 1,
@@ -616,6 +710,7 @@ mod tests {
             quelle: Some("notepad.exe".into()),
             zeit: 0,
             angeheftet: true,
+            titel: None,
         };
         assert_eq!(
             anzeige(&e, Some(1), 120),

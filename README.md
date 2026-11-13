@@ -23,6 +23,8 @@ dem Original.
   sich wieder einfügen.
 - **Anheften:** Strg+P hält einen Eintrag fest. Angeheftetes bleibt, auch wenn du
   den Verlauf leerst.
+- **Benennen:** F2 gibt einem angehefteten Eintrag einen eigenen Namen, etwa
+  „Meine Adresse“ statt der ersten Textzeile. Eingefügt wird weiter der Inhalt.
 - **Pausieren:** nimmt nichts auf, solange du mit vertraulichen Daten arbeitest.
 - **Mit Windows starten:** im Menü des Symbols im Infobereich.
 
@@ -33,6 +35,7 @@ dem Original.
 | Strg+Enter oder Strg+C | nur kopieren |
 | Strg+1 bis Strg+9 | Eintrag mit dieser Nummer einfügen |
 | Strg+P | anheften oder lösen |
+| F2 | angehefteten Eintrag benennen (Enter speichert, Esc bricht ab, leer = Inhalt zeigen) |
 | Entf | Eintrag löschen (in der Liste oder bei leerer Suche) |
 | Tab / Umschalt+Tab | Reiter wechseln: Verlauf, Angeheftet, Bilder |
 | Esc | schließen |

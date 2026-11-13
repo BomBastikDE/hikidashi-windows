@@ -1,5 +1,11 @@
 # Änderungen
 
+## 0.2.0 — unveröffentlicht
+
+- **Angeheftetes benennen:** F2 gibt einem angehefteten Eintrag einen eigenen Namen,
+  der in der Liste statt des Inhalts steht. Eingefügt wird weiter der Inhalt; die
+  Suche findet Name und Inhalt. Leerer Name zeigt wieder den Inhalt (#6).
+
 ## 0.1.0 — 2026-11-13
 
 Erste Windows-Fassung, neu geschrieben in Rust nach dem Vorbild von
