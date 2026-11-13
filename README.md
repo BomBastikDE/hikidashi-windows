@@ -103,3 +103,9 @@ sich auch unter Linux testen: `cargo test`.
 
 MIT, siehe [LICENSE](LICENSE). Idee, Bedienkonzept und Name stammen aus dem
 Mac-Original von Kenzo Weiss.
+
+---
+
+Gebaut von Oliver Muenk ·
+[LinkedIn](https://www.linkedin.com/in/oliver-muenk/) ·
+[alleswasbewegt.de](https://alleswasbewegt.de/)
