@@ -492,4 +492,215 @@ mod tests {
         assert_ne!(pruefsumme(b"a"), pruefsumme(b"b"));
         assert_eq!(symbol_bgra(16).len(), 16 * 16 * 4);
     }
+
+    /// BITMAPINFOHEADER-Grundkopf mit frei wählbarer Kopflänge.
+    fn dib_kopf(kopf: u32, breite: i32, hoehe: i32, bits: u16, kompression: u32) -> Vec<u8> {
+        let mut d = Vec::new();
+        d.extend_from_slice(&kopf.to_le_bytes());
+        d.extend_from_slice(&breite.to_le_bytes());
+        d.extend_from_slice(&hoehe.to_le_bytes());
+        d.extend_from_slice(&1u16.to_le_bytes());
+        d.extend_from_slice(&bits.to_le_bytes());
+        d.extend_from_slice(&kompression.to_le_bytes());
+        d.extend_from_slice(&[0u8; 20]);
+        d
+    }
+
+    #[test]
+    fn dib_v5_kopf_liest_masken_samt_alpha_aus_dem_kopf() {
+        // V5-Kopf (124 Bytes): Masken bei 40..56, Rest des Kopfes leer.
+        let mut d = dib_kopf(124, 1, 1, 32, BI_BITFIELDS);
+        for m in [0x00ff_0000u32, 0x0000_ff00, 0x0000_00ff, 0xff00_0000] {
+            d.extend_from_slice(&m.to_le_bytes());
+        }
+        d.resize(124, 0);
+        d.extend_from_slice(&[30, 20, 10, 128]); // B, G, R, A
+        assert_eq!(
+            dib_zu_rgba(&d, 1 << 20).unwrap().pixel,
+            vec![10, 20, 30, 128]
+        );
+    }
+
+    #[test]
+    fn dib_alphabitfields_liest_die_alphamaske_hinter_dem_kopf() {
+        let mut d = dib_kopf(40, 1, 1, 32, BI_ALPHABITFIELDS);
+        for m in [0x00ff_0000u32, 0x0000_ff00, 0x0000_00ff, 0xff00_0000] {
+            d.extend_from_slice(&m.to_le_bytes());
+        }
+        d.extend_from_slice(&[30, 20, 10, 64]);
+        assert_eq!(
+            dib_zu_rgba(&d, 1 << 20).unwrap().pixel,
+            vec![10, 20, 30, 64]
+        );
+    }
+
+    #[test]
+    fn dib_ueberspringt_die_farbtabelle() {
+        let mut d = dib_kopf(40, 1, 1, 24, BI_RGB);
+        d[32..36].copy_from_slice(&2u32.to_le_bytes()); // biClrUsed = 2
+        d.extend_from_slice(&[0xee; 8]); // zwei Tabelleneinträge
+        d.extend_from_slice(&[3, 2, 1, 0]);
+        assert_eq!(dib_zu_rgba(&d, 1 << 20).unwrap().pixel, vec![1, 2, 3, 255]);
+    }
+
+    #[test]
+    fn dib_24_bit_von_unten_wird_umgedreht() {
+        let mut d = dib_kopf(40, 1, 2, 24, BI_RGB);
+        d.extend_from_slice(&[3, 2, 1, 0, 6, 5, 4, 0]); // untere Zeile zuerst
+        assert_eq!(
+            dib_zu_rgba(&d, 1 << 20).unwrap().pixel,
+            vec![4, 5, 6, 255, 1, 2, 3, 255]
+        );
+    }
+
+    #[test]
+    fn dib_lehnt_unsinnige_masse_und_formate_ab() {
+        let pixel = [0u8; 64];
+        for (breite, hoehe, bits, kompression, warum) in [
+            (0, 1, 32, BI_RGB, "Breite 0"),
+            (-1, 1, 32, BI_RGB, "negative Breite"),
+            (1, 0, 32, BI_RGB, "Höhe 0"),
+            (1, i32::MIN, 32, BI_RGB, "Höhe i32::MIN"),
+            (30001, 1, 32, BI_RGB, "zu breit"),
+            (1, -30001, 32, BI_RGB, "zu hoch"),
+            (1, 1, 8, BI_RGB, "8 Bit mit Palette"),
+            (1, 1, 16, BI_RGB, "16 Bit"),
+            (1, 1, 24, 1, "RLE8"),
+        ] {
+            let mut d = dib_kopf(40, breite, hoehe, bits, kompression);
+            d.extend_from_slice(&pixel);
+            assert!(dib_zu_rgba(&d, 1 << 30).is_none(), "{warum}");
+        }
+        let mut kurzer_kopf = dib_kopf(12, 1, 1, 24, BI_RGB);
+        kurzer_kopf.extend_from_slice(&pixel);
+        assert!(dib_zu_rgba(&kurzer_kopf, 1 << 20).is_none(), "OS/2-Kopf");
+    }
+
+    #[test]
+    fn dib_mit_riesiger_farbtabelle_laeuft_nicht_ueber() {
+        let mut d = dib_kopf(40, 1, 1, 24, BI_RGB);
+        d[32..36].copy_from_slice(&u32::MAX.to_le_bytes());
+        d.extend_from_slice(&[0u8; 4]);
+        assert!(dib_zu_rgba(&d, 1 << 20).is_none());
+    }
+
+    #[test]
+    fn kanal_skaliert_schmale_masken_auf_8_bit() {
+        assert_eq!(kanal(0b11111, 0b11111), 255); // 5 Bit voll
+        assert_eq!(kanal(0, 0b11111), 0);
+        assert_eq!(kanal(0xffff_ffff, 0), 0, "fehlende Maske");
+    }
+
+    fn png_mit(farbe: png::ColorType, breite: u32, hoehe: u32, daten: &[u8]) -> Vec<u8> {
+        let mut aus = Vec::new();
+        let mut enc = png::Encoder::new(&mut aus, breite, hoehe);
+        enc.set_color(farbe);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.write_header().unwrap().write_image_data(daten).unwrap();
+        aus
+    }
+
+    #[test]
+    fn png_rgb_wird_deckend() {
+        let p = png_mit(png::ColorType::Rgb, 1, 1, &[1, 2, 3]);
+        assert_eq!(png_dekodieren(&p).unwrap().pixel, vec![1, 2, 3, 255]);
+    }
+
+    #[test]
+    fn png_graustufen_mit_und_ohne_alpha() {
+        let g = png_mit(png::ColorType::Grayscale, 2, 1, &[7, 9]);
+        assert_eq!(
+            png_dekodieren(&g).unwrap().pixel,
+            vec![7, 7, 7, 255, 9, 9, 9, 255]
+        );
+        let ga = png_mit(png::ColorType::GrayscaleAlpha, 1, 1, &[7, 100]);
+        assert_eq!(png_dekodieren(&ga).unwrap().pixel, vec![7, 7, 7, 100]);
+    }
+
+    #[test]
+    fn png_mit_palette_wird_zu_rgba() {
+        let mut aus = Vec::new();
+        {
+            let mut enc = png::Encoder::new(&mut aus, 2, 1);
+            enc.set_color(png::ColorType::Indexed);
+            enc.set_depth(png::BitDepth::Eight);
+            enc.set_palette(vec![10, 20, 30, 40, 50, 60]);
+            enc.write_header()
+                .unwrap()
+                .write_image_data(&[1, 0])
+                .unwrap();
+        }
+        let r = png_dekodieren(&aus).unwrap();
+        assert_eq!(r.pixel, vec![40, 50, 60, 255, 10, 20, 30, 255]);
+    }
+
+    #[test]
+    fn dropfiles_ansi_wird_gelesen() {
+        let mut d = Vec::new();
+        d.extend_from_slice(&20u32.to_le_bytes());
+        d.extend_from_slice(&[0u8; 12]); // pt, fNC
+        d.extend_from_slice(&0u32.to_le_bytes()); // fWide = 0
+        d.extend_from_slice(b"C:\\a.txt\0D:\\b.txt\0\0");
+        assert_eq!(dropfiles_lesen(&d), vec![r"C:\a.txt", r"D:\b.txt"]);
+    }
+
+    #[test]
+    fn dropfiles_mit_versatz_hinter_dem_ende_ist_leer() {
+        let mut d = dropfiles_bauen(&["x".into()]);
+        d[0..4].copy_from_slice(&9999u32.to_le_bytes());
+        assert!(dropfiles_lesen(&d).is_empty());
+    }
+
+    #[test]
+    fn dropfiles_ohne_pfade_ist_leer() {
+        assert!(dropfiles_lesen(&dropfiles_bauen(&[])).is_empty());
+    }
+
+    #[test]
+    fn passwortmanager_auch_mit_schraegstrich_und_leerzeichen_im_namen() {
+        assert!(ist_passwortmanager(
+            "C:/Programme/Proton Pass/Proton Pass.exe"
+        ));
+        assert!(!ist_passwortmanager("keepass.exe.bak"));
+        assert!(!ist_passwortmanager(""));
+    }
+
+    #[test]
+    fn passwortgrenzen_8_und_64_zeichen() {
+        assert!(sieht_aus_wie_passwort("Ab1!Ab1!"));
+        assert!(sieht_aus_wie_passwort(&"Ab1!".repeat(16)));
+        assert!(!sieht_aus_wie_passwort("Ab1!Ab1"));
+        assert!(!sieht_aus_wie_passwort("Ab1!Ab1!\u{7}"), "Steuerzeichen");
+    }
+
+    #[test]
+    fn email_ohne_gueltige_endung_kann_passwort_sein() {
+        // Kein E-Mail-Muster: Endung mit Ziffer.
+        assert!(sieht_aus_wie_passwort("Abc@def.g1"));
+        assert!(!sieht_aus_wie_passwort("Abc1@def.gh"), "echte E-Mail-Form");
+    }
+
+    #[test]
+    fn uuid_in_geschweiften_klammern_und_mailto_sind_kein_passwort() {
+        assert!(!sieht_aus_wie_passwort(
+            "{550E8400-e29b-41d4-a716-446655440000}"
+        ));
+        assert!(!sieht_aus_wie_passwort("mailto:Max1@x.de"));
+        assert!(!sieht_aus_wie_passwort(r".\Ordner\Datei1"));
+    }
+
+    #[test]
+    fn pruefsumme_ist_fnv1a() {
+        assert_eq!(pruefsumme(b""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(pruefsumme(b"a"), 0xaf63_dc4c_8601_ec8c);
+    }
+
+    #[test]
+    fn symbol_hat_durchsichtige_ecken_und_deckende_mitte() {
+        let g = 32;
+        let d = symbol_bgra(g);
+        let alpha = |x: u32, y: u32| d[((y * g + x) * 4 + 3) as usize];
+        assert_eq!(alpha(0, 0), 0);
+        assert_eq!(alpha(16, 20), 255);
+    }
 }
