@@ -724,4 +724,212 @@ mod tests {
         assert_eq!(Reiter::Bilder.naechster(false), Reiter::Verlauf);
         assert_eq!(Reiter::Verlauf.naechster(true), Reiter::Bilder);
     }
+
+    #[test]
+    fn leere_dateiliste_wird_ignoriert() {
+        let mut v = Verlauf::laden(&ordner("dateien-leer"));
+        assert!(v.dateien_aufnehmen(vec![], None, 1).is_none());
+        assert!(v.eintraege.is_empty());
+    }
+
+    #[test]
+    fn gleiche_dateiliste_wandert_nach_oben() {
+        let mut v = Verlauf::laden(&ordner("dateien-doppelt"));
+        let liste = vec![r"C:\a.txt".to_string(), r"C:\b.txt".to_string()];
+        let a = v.dateien_aufnehmen(liste.clone(), None, 1).unwrap();
+        v.text_aufnehmen("dazwischen".into(), None, 2);
+        let a2 = v.dateien_aufnehmen(liste, None, 3).unwrap();
+        assert_eq!(a, a2);
+        assert_eq!(v.eintraege.len(), 2);
+        assert_eq!(v.eintraege[0].id, a);
+    }
+
+    #[test]
+    fn andere_reihenfolge_der_dateien_ist_ein_neuer_eintrag() {
+        let mut v = Verlauf::laden(&ordner("dateien-reihenfolge"));
+        v.dateien_aufnehmen(vec!["a".into(), "b".into()], None, 1);
+        v.dateien_aufnehmen(vec!["b".into(), "a".into()], None, 2);
+        assert_eq!(v.eintraege.len(), 2);
+    }
+
+    #[test]
+    fn gleiches_bild_schreibt_keine_zweite_datei() {
+        let o = ordner("bild-doppelt");
+        let mut v = Verlauf::laden(&o);
+        let a = v
+            .bild_aufnehmen(b"png", 4, 3, 42, None, 1)
+            .unwrap()
+            .unwrap();
+        let a2 = v
+            .bild_aufnehmen(b"png", 4, 3, 42, Some("mspaint.exe".into()), 2)
+            .unwrap()
+            .unwrap();
+        assert_eq!(a, a2);
+        assert_eq!(v.eintraege.len(), 1);
+        assert_eq!(v.eintraege[0].quelle.as_deref(), Some("mspaint.exe"));
+        assert_eq!(fs::read_dir(o.join(BILDER)).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn gleiche_pruefsumme_mit_anderer_groesse_ist_ein_neues_bild() {
+        let mut v = Verlauf::laden(&ordner("bild-groesse"));
+        let a = v
+            .bild_aufnehmen(b"png", 4, 3, 42, None, 1)
+            .unwrap()
+            .unwrap();
+        let b = v
+            .bild_aufnehmen(b"png", 3, 4, 42, None, 2)
+            .unwrap()
+            .unwrap();
+        assert_ne!(a, b);
+        assert_eq!(v.eintraege.len(), 2);
+    }
+
+    #[test]
+    fn loeschen_entfernt_eintrag_und_bilddatei() {
+        let mut v = Verlauf::laden(&ordner("loeschen"));
+        let b = v.bild_aufnehmen(b"png", 1, 1, 1, None, 1).unwrap().unwrap();
+        let pfad = v.bild_pfad(v.finden(b).unwrap()).unwrap();
+        assert!(v.loeschen(b));
+        assert!(v.finden(b).is_none());
+        assert!(!pfad.exists());
+    }
+
+    #[test]
+    fn loeschen_einer_unbekannten_id_aendert_nichts() {
+        let mut v = Verlauf::laden(&ordner("loeschen-unbekannt"));
+        v.text_aufnehmen("bleibt".into(), None, 1);
+        assert!(!v.loeschen(999));
+        assert_eq!(v.eintraege.len(), 1);
+    }
+
+    #[test]
+    fn leeren_loescht_bilddateien_und_behaelt_angeheftete_bilder() {
+        let mut v = Verlauf::laden(&ordner("leeren-bilder"));
+        let weg = v.bild_aufnehmen(b"png", 1, 1, 1, None, 1).unwrap().unwrap();
+        let fest = v.bild_aufnehmen(b"png", 1, 1, 2, None, 2).unwrap().unwrap();
+        v.anheften_umschalten(fest);
+        let weg_pfad = v.bild_pfad(v.finden(weg).unwrap()).unwrap();
+        let fest_pfad = v.bild_pfad(v.finden(fest).unwrap()).unwrap();
+        v.leeren();
+        assert!(!weg_pfad.exists());
+        assert!(fest_pfad.exists());
+        assert_eq!(v.eintraege.len(), 1);
+    }
+
+    #[test]
+    fn anheften_schaltet_hin_und_zurueck() {
+        let mut v = Verlauf::laden(&ordner("anheften"));
+        let a = v.text_aufnehmen("x".into(), None, 1).unwrap();
+        assert!(v.anheften_umschalten(a));
+        assert!(!v.anheften_umschalten(a));
+        assert!(!v.finden(a).unwrap().angeheftet);
+        assert!(!v.anheften_umschalten(999), "unbekannte ID");
+    }
+
+    #[test]
+    fn geheime_texte_entfernen_laesst_bilder_und_dateien_stehen() {
+        let mut v = Verlauf::laden(&ordner("geheim-andere"));
+        v.bild_aufnehmen(b"png", 1, 1, 1, None, 1).unwrap();
+        v.dateien_aufnehmen(vec!["GEHEIM.txt".into()], None, 2);
+        assert_eq!(v.texte_entfernen(|_| true), 0);
+        assert_eq!(v.eintraege.len(), 2);
+    }
+
+    #[test]
+    fn benutzt_mit_unbekannter_id_aendert_nichts() {
+        let mut v = Verlauf::laden(&ordner("benutzt-unbekannt"));
+        let a = v.text_aufnehmen("a".into(), None, 1).unwrap();
+        v.benutzt(999, 5);
+        assert_eq!(v.eintraege[0].id, a);
+        assert_eq!(v.eintraege[0].zeit, 1);
+    }
+
+    #[test]
+    fn bilder_im_verlaufsreiter_mit_suchwort_bild_finden() {
+        let mut v = Verlauf::laden(&ordner("suche-bild"));
+        let b = v.bild_aufnehmen(b"png", 1, 1, 1, None, 1).unwrap().unwrap();
+        v.text_aufnehmen("Text".into(), None, 2);
+        assert_eq!(v.auswahl(Reiter::Verlauf, "BILD"), vec![b]);
+    }
+
+    fn eintrag(art: Art) -> Eintrag {
+        Eintrag {
+            id: 1,
+            art,
+            text: None,
+            dateien: vec![],
+            bild: None,
+            breite: 0,
+            hoehe: 0,
+            pruefsumme: 0,
+            quelle: None,
+            zeit: 0,
+            angeheftet: false,
+            titel: None,
+        }
+    }
+
+    #[test]
+    fn anzeige_einer_datei_zeigt_nur_den_dateinamen() {
+        let mut e = eintrag(Art::Datei);
+        e.dateien = vec![r"C:\Users\Max\Bericht.pdf".into()];
+        assert_eq!(anzeige(&e, None, 0), "    📄 Bericht.pdf   · gerade eben");
+    }
+
+    #[test]
+    fn anzeige_mehrerer_dateien_nennt_die_anzahl_der_weiteren() {
+        let mut e = eintrag(Art::Datei);
+        e.dateien = vec![
+            "/tmp/a.txt".into(),
+            "/tmp/b.txt".into(),
+            "/tmp/c.txt".into(),
+        ];
+        assert_eq!(
+            anzeige(&e, Some(3), 0),
+            "3  📄 a.txt und 2 weitere   · gerade eben"
+        );
+    }
+
+    #[test]
+    fn anzeige_eines_bildes_ohne_namen_zeigt_die_groesse() {
+        let mut e = eintrag(Art::Bild);
+        (e.breite, e.hoehe) = (640, 480);
+        assert_eq!(anzeige(&e, None, 0), "    🖼 Bild 640 × 480   · gerade eben");
+    }
+
+    #[test]
+    fn anzeige_kuerzt_exe_in_grossbuchstaben() {
+        let mut e = eintrag(Art::Text);
+        e.text = Some("x".into());
+        e.quelle = Some("WINWORD.EXE".into());
+        assert_eq!(anzeige(&e, None, 0), "    x   · gerade eben · WINWORD");
+    }
+
+    #[test]
+    fn erste_zeile_genau_90_zeichen_bleibt_ohne_auslassung() {
+        assert_eq!(erste_zeile(&"ä".repeat(90)), "ä".repeat(90));
+        assert_eq!(erste_zeile("  \n\t\n"), "");
+    }
+
+    #[test]
+    fn wann_an_den_grenzen() {
+        assert_eq!(wann(59), "gerade eben");
+        assert_eq!(wann(60), "vor 1 Min.");
+        assert_eq!(wann(3599), "vor 59 Min.");
+        assert_eq!(wann(3600), "vor 1 Std.");
+        assert_eq!(wann(86399), "vor 23 Std.");
+        assert_eq!(wann(86400), "gestern");
+        assert_eq!(wann(172800), "vor 2 Tagen");
+    }
+
+    #[test]
+    fn reiter_durchlaufen_sich_vollstaendig() {
+        let mut r = Reiter::Verlauf;
+        for erwartet in [Reiter::Angeheftet, Reiter::Bilder, Reiter::Verlauf] {
+            r = r.naechster(false);
+            assert_eq!(r, erwartet);
+        }
+        assert_eq!(Reiter::Angeheftet.naechster(true), Reiter::Verlauf);
+    }
 }
